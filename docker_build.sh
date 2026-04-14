@@ -8,7 +8,7 @@ JOBS="${JOBS:-4}"
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
-apt-get install -y --no-install-recommends ca-certificates curl xz-utils python2.7
+apt-get install -y --no-install-recommends ca-certificates curl xz-utils python2.7 python-serial
 if ! command -v python2 >/dev/null 2>&1; then
   ln -sf /usr/bin/python2.7 /usr/bin/python2
 fi
