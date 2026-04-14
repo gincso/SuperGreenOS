@@ -1,4 +1,8 @@
 #!/bin/bash
+# Fail fast when dependencies are missing.
+set -euo pipefail
+command -v cue >/dev/null 2>&1 || { echo "ERROR: cue not found (install from https://github.com/cue-lang/cue)" >&2; exit 1; }
+
 # Copyright (C) 2019  SuperGreenLab <towelie@supergreenlab.com>
 # Author: Constantin Clauzel <constantin.clauzel@gmail.com>
 #
