@@ -19,25 +19,30 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install node dependencies (ejs-cli)
-        run: npm install -g ejs-cli
-
-      - name: Install CUE
+      # The IDF image has no Node/npm, so install Node 16 from the
+      # official binary (same approach as docker_build.sh), then ejs-cli.
+      - name: Install Node and ejs-cli
         run: |
-          CUE_VERSION="v0.6.0"
-          CUE_TARBALL="cue_${CUE_VERSION}_linux_amd64.tar.gz"
-          curl -sSL -o "/tmp/${CUE_TARBALL}" "https://github.com/cue-lang/cue/releases/download/${CUE_VERSION}/${CUE_TARBALL}"
-          echo "3ae7b28e12de2e0554c28d9a9eb3dd919f0640274c925ba0e36de9079af80de2  /tmp/${CUE_TARBALL}" | sha256sum -c -
-          tar -xz -C /usr/local/bin -f "/tmp/${CUE_TARBALL}" cue
+          NODE_VERSION="v16.20.2"
+          curl -fsSL -o "/tmp/node.tar.xz" "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz"
+          tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1
+          node --version
+          npm install -g ejs-cli
 
-      - name: Generate templates and config
-        run: |
-          ./update_config.sh config_gen/config/SuperGreenOS/Controllers/Driver config.driver.json
-          ./update_templates.sh config.driver.json
+      # NOTE: do NOT regenerate config.driver.json with CUE here.
+      # The config_gen/*.cue files use pre-0.3 CUE syntax that fails
+      # on every modern CUE release (tested 0.3, 0.4, 0.6), and a
+      # failed `cue export` would truncate the committed JSON.
+      # The committed config.driver.json is the source of truth
+      # until the cue sources are migrated to modern CUE.
+      - name: Generate templates from committed config
+        run: ./update_templates.sh config.driver.json
 
       - name: Build firmware
         run: |
           . $IDF_PATH/export.sh
+          make defconfig
+          grep PYTHON sdkconfig
           make -j$(nproc)
 
       - name: Upload firmware artifacts
