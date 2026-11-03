@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SuperGreenOS GUI Compiler</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:0;background:#0f1a12;color:#e8f0e8}
+header{background:#1d3a24;padding:14px 16px}h1{margin:0;font-size:20px}
+main{padding:16px;max-width:900px;margin:auto}
+button{background:#4caf50;color:#fff;border:0;padding:12px 18px;border-radius:8px;font-size:16px;cursor:pointer}
+button:disabled{opacity:.5}input,select,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #444;background:#16241a;color:#fff;box-sizing:border-box}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+.card{background:#16241a;border:1px solid #2c4a32;border-radius:12px;padding:14px;margin:12px 0}
+.set{display:grid;grid-template-columns:2fr 1fr;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #24382a}
+.set label{font-size:14px;word-break:break-word}.set small{color:#9db89d;display:block}
+pre{background:#000;color:#b8ffb8;padding:12px;border-radius:8px;white-space:pre-wrap;max-height:400px;overflow:auto}
+#login{max-width:400px;margin:80px auto;text-align:center}
+a{color:#8fd694}
+</style></head><body>
+<div id="login"><h1>🌱 SuperGreenOS Compiler</h1><p>Enter the token from <code>/root/sgl-compiler/token.txt</code> on the VPS.</p>
+<input id="tok" type="password" placeholder="Token"><br><br><button onclick="login()">Unlock</button><p id="loginErr" style="color:#ff8a8a"></p></div>
+<div id="app" style="display:none">
+<header><h1>🌱 SuperGreenOS GUI Compiler</h1><div id="statusLine">Ready</div></header>
+<main>
+<div class="card">
+<div class="row"><div><label>Profile</label><select id="profile"></select></div>
+<div><label>Search settings</label><input id="search" placeholder="e.g. mqtt, wifi ssid, gpio, broker" oninput="render()"></div></div>
+<p>Settings below are <code>modules.&lt;module&gt;.fields.&lt;field&gt;.default</code> from the config JSON. Edit, save, then compile. A backup (<code>.bak</code>) is made on every save. CUE regeneration is skipped on purpose — the old CUE files don't work with modern CUE, the JSON is the source of truth.</p>
+<div style="display:flex;gap:10px;flex-wrap:wrap">
+<button onclick="saveConfig()">💾 Save settings</button>
+<button onclick="compile()" id="compileBtn">🔨 Compile</button>
+<button onclick="loadStatus()">↻ Refresh status</button>
+</div><p id="msg"></p>
+</div>
+<div class="card"><h2>Settings</h2><div id="settings">Load a profile…</div></div>
+<div class="card"><h2>Build log</h2><pre id="log">No build yet.</pre><h2>Downloads</h2><div id="builds"></div></div>
+</main></div>
+<script>
+let cfg=null, token=localStorage.getItem('sglToken')||'';
+function api(path, opts={}){opts.headers=Object.assign({'X-SGL-Token':token},opts.headers||{});return fetch(path,opts)}
+async function login(){token=document.getElementById('tok').value.trim();localStorage.setItem('sglToken',token);
+ const r=await api('/api/profiles'); if(!r.ok){document.getElementById('loginErr').textContent='Bad token';return}
+ document.getElementById('login').style.display='none';document.getElementById('app').style.display='block';
+ const j=await r.json(); const sel=document.getElementById('profile'); sel.innerHTML=j.profiles.map(p=>`<option>${p}</option>`).join('');
+ sel.onchange=loadConfig; await loadConfig(); loadStatus(); setInterval(loadStatus,8000);}
+async function loadConfig(){const p=document.getElementById('profile').value;
+ const r=await api('/api/config?profile='+p); if(!r.ok){document.getElementById('msg').textContent='Failed to load config';return}
+ cfg=await r.json(); render();}
+function flatten(){let out=[];
+ if(!cfg||!cfg.modules) return out;
+ for(const [mod,m] of Object.entries(cfg.modules)){
+   out.push({path:`modules.${mod}.enabled`,label:`${mod} — enabled`,val:m.enabled,mod});
+   const f=m.fields||{};
+   for(const [k,v] of Object.entries(f)){out.push({path:`modules.${mod}.fields.${k}.default`,label:`${mod} — ${k}`,val:(v&&typeof v==='object')?v.default:v,mod});}
+ } return out;}
+function render(){const q=(document.getElementById('search').value||'').toLowerCase();
+ const rows=flatten().filter(r=>!q||r.label.toLowerCase().includes(q)||r.path.toLowerCase().includes(q)).slice(0,300);
+ document.getElementById('settings').innerHTML=rows.map((r,i)=>`<div class="set"><label>${r.label}<small>${r.path}</small></label><input data-path="${r.path}" value="${String(r.val??'').replace(/"/g,'&quot;')}"></div>`).join('')||'<p>No matches.</p>';
+ if(q) document.getElementById('settings').insertAdjacentHTML('beforeend',`<p>Showing ${rows.length} matches (first 300).</p>`);}
+function setPath(obj,path,val){const parts=path.split('.');let cur=obj;for(let i=0;i<parts.length-1;i++)cur=cur[parts[i]];
+ const last=parts[parts.length-1]; const orig=cur[last];
+ if(typeof orig==='number'){const n=Number(val); cur[last]=isNaN(n)?val:n;}
+ else if(typeof orig==='boolean'){cur[last]=(val==='true'||val==='1'||val.toLowerCase()==='yes');}
+ else cur[last]=val;}
+async function saveConfig(){document.querySelectorAll('#settings input[data-path]').forEach(el=>setPath(cfg,el.dataset.path,el.value));
+ const p=document.getElementById('profile').value;
+ const r=await api('/api/config?profile='+p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+ document.getElementById('msg').textContent=r.ok?'Saved.':'Save failed: '+(await r.text());}
+async function compile(){await saveConfig(); const p=document.getElementById('profile').value;
+ const r=await api('/api/compile?profile='+p,{method:'POST'});
+ document.getElementById('msg').textContent=r.ok?'Build started — watch the log below.':'Compile failed: '+(await r.text());}
+async function loadStatus(){const r=await api('/api/status'); if(!r.ok) return; const s=await r.json();
+ document.getElementById('statusLine').textContent=s.running?`🔨 Building ${s.last_profile}…`:(s.last_exit===0?`✅ Last build OK (${s.last_profile})`:(s.last_exit!==null?`❌ Last build failed, exit ${s.last_exit}`:'Ready'));
+ if(s.log_tail) document.getElementById('log').textContent=s.log_tail;
+ document.getElementById('builds').innerHTML=(s.builds||[]).map(b=>`<div><b>${b.dir}</b>: ${b.files.map(f=>`<a href="/api/download?build=${b.dir}&file=${f}&token=${encodeURIComponent(token)}">${f}</a>`).join(' ')}</div>`).join('')||'No finished builds yet.';}
+if(token){document.getElementById('tok').value=token; login();}
+</script></body></html>
